@@ -1,7 +1,10 @@
 import { Client, IntentsBitField, messageLink } from "discord.js";
 import { randomBytes } from "crypto";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import dotenv from "dotenv";
 dotenv.config();
+
+const geminiApiKey = process.env.GEMINI_API_KEY;
 const client = new Client({
   intents: [
     IntentsBitField.Flags.Guilds,
@@ -11,7 +14,17 @@ const client = new Client({
   ],
 });
 
-function playRPS(choice) {
+const genAI = new GoogleGenerativeAI(geminiApiKey);
+const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+
+async function generateAIResponse(prompt) {
+  const result = await model.generateContent(prompt);
+  const response = await result.response;
+  const text = response.text();
+  return text;
+}
+
+const playRPS = (choice) => {
   const choices = ["rock", "paper", "scissors"];
 
   const randomIndex = Math.floor((randomBytes(1)[0] / 255) * choices.length);
@@ -31,7 +44,7 @@ function playRPS(choice) {
   }
 
   return { userChoice: choice, botChoice: botChoice, result: result };
-}
+};
 
 client.on("ready", () => {
   console.log(`Logged in as ${client.user.tag}!`);
@@ -39,14 +52,16 @@ client.on("ready", () => {
 
 client.on("messageCreate", async (msg) => {
   if (msg.author.bot) return;
-
+  const botId = process.env.BOT_ID;
   const prefix = "$";
-  if (msg.content.toLowerCase() === `${prefix}ping`) {
-    msg.reply("Pong!");
-  } else if (msg.content.toLowerCase() === `${prefix}play game`) {
-    msg.reply(
-      "Let's play Rock-Paper-Scissors! Type `$rps` followed by your choice: rock, paper, or scissors."
-    );
+  if (msg.content.includes(`<@${botId}>`)) {
+    const prompt = msg.content.replace(`<@${botId}>`, "").trim();
+    if (prompt.length === 0) {
+      msg.reply("Please provide a prompt after mentioning the bot.");
+      return;
+    }
+    const response = await generateAIResponse(prompt);
+    msg.reply(response);
   } else if (msg.content.toLowerCase().startsWith(`${prefix}rps`)) {
     const args = msg.content.toLowerCase().split(" ");
     if (args.length !== 2 || !["rock", "paper", "scissors"].includes(args[1])) {
@@ -85,6 +100,22 @@ client.on("messageCreate", async (msg) => {
         console.error("error in muting player:", err);
       }
     }
+  }
+});
+
+client.on("interactionCreate", async (interaction) => {
+  if (!interaction.isChatInputCommand()) return;
+  if (interaction.commandName === "rps") {
+    interaction.reply(
+      "Let's play Rock-Paper-Scissors! Type `$rps` followed by your choice: rock, paper, or scissors."
+    );
+  }
+  if (interaction.commandName === "genreply") {
+    const prompt = interaction.options.getString("prompt");
+    console.log("Prompt:", prompt);
+    await interaction.deferReply({ ephemeral: true });
+    const response = await generateAIResponse(prompt);
+    await interaction.followUp(response);
   }
 });
 
